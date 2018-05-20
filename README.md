@@ -1,6 +1,6 @@
 # centry - container entry
 
-A solution for command-line programs written in bash
+A library for command-line programs written in bash
 
 ## Pre-requisites
 - bash
