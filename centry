@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+
+export CENTRY_ROOT
+export CENTRY_MANIFEST_FILE
+export CENTRY_LOG_LEVEL
+export CENTRY_LOG_PREFIX
+
+CENTRY_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+source ${CENTRY_ROOT}/logs.sh
+source ${CENTRY_ROOT}/arrays.sh
+
+centry:load_script () {
+  local path="${1:?}"
+  log_debug "sourcing ${path:?}"
+  if [[ ! -f ${path:?} ]]; then
+    log_error "File does not exist (${path:?})"
+    exit 1
+  fi
+
+  # shellcheck source=/dev/null
+  source ${path:?}
+}
+
+centry:get_commands () {
+  local name="${1:?}"
+  declare -F | grep "${name:?}" | cut -c12-
+}
+
+centry:exec_command () {
+  local command_json="${1:?}"
+  local command="${2:?}"
+  local subcommand="${3}"
+  local subcommands=()
+  local exit_code=0
+
+  shift; shift;
+
+  subcommands+=($(centry:get_commands "${command:?}:" | xargs))
+
+  log_trace "available subcommands: ${#subcommands[*]} (${subcommands[*]})"
+
+  local statement
+  if [[ ${#subcommands[*]} -gt 0 ]]; then
+    array_contains "${command:?}:${subcommand}" ${subcommands[@]}
+    if [[ $? -eq 0 ]]; then
+      log_debug "matched subcommand ${command:?}:${subcommand:?}"
+      statement="${command:?}:$@"
+    fi
+  else
+    log_debug "matched command ${command:?}"
+    statement="${command:?} $@"
+  fi
+
+  if [[ "${statement}" == "" ]]; then
+    centry:help "command: ${command:?}" 'subcommands' "${subcommands[*]}" 1
+  fi
+
+  log_debug "executing: ${statement:?}"
+  ${statement:?}
+  exit_code=$?
+
+  if [[ ${exit_code:?} -gt 0 ]]; then
+    log_error "failed to execute command '${command:?}'"
+    exit ${exit_code}
+  fi
+}
+
+centry:help () {
+  local title="${1:?}"
+  local commands_title="${2:?}"
+  local available_commands=(${3:?})
+  local exit_code=${4:-0}
+  local command_names=()
+
+  echo
+  echo "${title:?}"
+  echo
+  echo "${commands_title:?}:"
+  for command in ${available_commands[*]}; do
+    echo "  - ${command/:/ }"
+  done
+  echo
+
+  log_debug "Exiting with code: ${exit_code}"
+  exit ${exit_code:?}
+}
+
+centry:set_option () {
+  local readonly json="${1:?}"
+  local readonly opt_name="${2:?}"
+  local readonly opt_value="${3}"
+  local readonly conf_def_value="$(echo "$json" | jq  -r ".default")"
+  local readonly conf_env_name="$(echo "$json" | jq  -r ".env_name")"
+  local env_key="$(echo "${opt_name:?}" | tr '[:lower:]' '[:upper:]')"
+  local env_value="${opt_value}"
+
+  [ "${conf_env_name}" != "null" ] && env_key="${conf_env_name:?}"
+  [ "${conf_def_value}" != "null" ] && [ -z "${env_value}" ] && env_value="${conf_def_value:?}"
+  [ "${conf_def_value}" == "null" ] && [ -z "${env_value}" ] && env_value="${opt_name:?}"
+
+  log_trace "applying option..."
+  log_trace "name: $opt_name"
+  log_trace "value: ${opt_value}"
+  log_trace "conf default value: ${conf_def_value}"
+  log_trace "conf env name: ${conf_env_name}"
+  log_debug "setting environment variable '${env_key:?}' to '${env_value}'"
+
+  export "${env_key:?}"="${env_value}"
+}
+
+centry:init () {
+  local readonly manifest_json="${1:?}"
+  shift
+
+  # Init logger
+  local readonly log_level="${CENTRY_LOG_LEVEL:-$(echo "$manifest_json" | yq -r '.config.log.level')}"
+  local readonly log_prefix="${CENTRY_LOG_PREFIX:-$(echo "$manifest_json" | yq -r '.config.log.prefix')}"
+  logger_configure "${log_level}" "${log_prefix}"
+
+  # Init options
+  local readonly options_json="$(echo "$manifest_json" | yq -r '.options[]')"
+  local readonly option_names=($(echo "$options_json" | jq -r '.name'))
+  local final_args=()
+
+  local opt_name
+  local opt_value
+  local opt_str
+  local opt_parts
+  for arg in $@; do
+    if [[ "${arg:0:2}" == "--" ]]; then
+      opt_name=''
+      opt_value=''
+      opt_str="${arg:2}"
+      opt_parts=(${opt_str//=/ })
+      [[ ${#opt_parts[@]} -eq 1 ]] && opt_name="${opt_str}" && opt_value=""
+      [[ ${#opt_parts[@]} -eq 2 ]] && opt_name="${opt_parts[0]}" && opt_value="${opt_parts[1]}"
+
+      array_contains "${opt_name}" ${option_names[@]}
+      if [[ $? -eq 0 ]]; then
+        centry:set_option "$(echo "$options_json" | jq  ". | select(.name == \"${opt_name:?}\") | .")" "${opt_name:?}" "${opt_value}"
+      else
+        log_error "Unkown option ${opt_name}"
+        exit 1
+      fi
+    else
+      final_args+=(${arg})
+    fi
+  done
+
+  export CENTRY_EXEC_ARGS="${final_args[*]}"
+}
+
+centry:main () {
+  local readonly manifest_path="${1:?}"
+  local manifest_json
+  local exec_args=(${CENTRY_EXEC_ARGS})
+  local commands_json
+  local command_json
+  local command_names=()
+  local scripts=()
+  shift
+
+  local manifest_root="$( cd "$( dirname "${manifest_path:?}")" && pwd )"
+  [ ! -z "${manifest_root}" ] || exit 1
+  local manifest_filename="$(basename "${manifest_path:?}")"
+  [ ! -z "${manifest_filename}" ] || exit 1
+  CENTRY_MANIFEST_FILE="${manifest_root:?}/${manifest_filename:?}"
+
+  manifest_json="$(cat ${CENTRY_MANIFEST_FILE:?})"
+  centry:init "${manifest_json:?}" "$@"
+  exec_args=(${CENTRY_EXEC_ARGS})
+
+  scripts+=("$(echo "$manifest_json" | yq -r '.scripts[]')")
+  commands_json="$(echo "$manifest_json" | yq -r '.commands[]')"
+  command_names+=($(echo "$commands_json" | jq -r '.name'))
+
+  for s in ${scripts[*]}; do
+    centry:load_script ${s:?} ${exec_args[*]}
+  done
+
+  command_json="$(echo "$commands_json" | jq  ". | select(.name == \"${exec_args[0]}\") | .")"
+
+  if [[ ${#exec_args[@]} -lt 1 ]] || [[ "${command_json}" == "" ]]; then
+    centry:help 'Unknown command!' 'commands' "${command_names[*]}" 1
+  fi
+
+  centry:load_script "$(echo ${command_json:?} | jq -r '.path')"
+  centry:exec_command "${command_json:?}" ${exec_args[*]}
+}
+
+centry:main "$@"

@@ -1,0 +1,34 @@
+scripts:
+  - scripts/kops.sh
+  - scripts/kubernetes.sh
+  - scripts/terraspaces.sh
+
+commands:
+  - name: up
+    path: commands/up.sh
+  - name: down
+    path: commands/down.sh
+  - name: ssh
+    path: commands/ssh.sh
+  - name: rotate
+    path: commands/rotate.sh
+
+options:
+  - name: context
+    default: ops
+  - name: foo
+    env_name: BAR
+    default: baz
+  - name: ops
+    env_name: CONTEXT
+  - name: dev
+    env_name: CONTEXT
+  - name: qa
+    env_name: CONTEXT
+  - name: prod
+    env_name: CONTEXT
+
+config:
+  log:
+    level: debug
+    prefix: '[centry] '

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+declare here
+here="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+cd ${here:?} || exit
+../centry ./centry.yaml
+cd --
