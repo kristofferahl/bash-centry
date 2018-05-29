@@ -61,7 +61,7 @@ centry:exec_command () {
   exit_code=$?
 
   if [[ ${exit_code:?} -gt 0 ]]; then
-    log_error "failed to execute command '${command:?}'"
+    log_error "command '${command:?}' exited with code: ${exit_code:?}"
     exit ${exit_code}
   fi
 }
