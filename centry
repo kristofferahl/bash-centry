@@ -7,8 +7,10 @@ export CENTRY_LOG_PREFIX
 
 CENTRY_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-source ${CENTRY_ROOT}/logs.sh
-source ${CENTRY_ROOT}/arrays.sh
+# shellcheck source=/dev/null
+source "${CENTRY_ROOT}/logs.sh"
+# shellcheck source=/dev/null
+source "${CENTRY_ROOT}/arrays.sh"
 
 centry:load_script () {
   local path="${1:?}"
@@ -53,7 +55,7 @@ centry:exec_command () {
   fi
 
   if [[ "${statement}" == "" ]]; then
-    centry:help "command: ${command:?}" 'subcommands' "${subcommands[*]}" 1
+    centry:help "Command: ${command:?}" 'Subcommands' "${subcommands[*]}" 1
   fi
 
   log_debug "executing: ${statement:?}"
@@ -140,7 +142,7 @@ centry:init () {
       if [[ $? -eq 0 ]]; then
         centry:set_option "$(echo "$options_json" | jq  ". | select(.name == \"${opt_name:?}\") | .")" "${opt_name:?}" "${opt_value}"
       else
-        log_error "Unkown option ${opt_name}"
+        log_error "Unknown option ${opt_name}"
         exit 1
       fi
     else
@@ -182,7 +184,7 @@ centry:main () {
   command_json="$(echo "$commands_json" | jq  ". | select(.name == \"${exec_args[0]}\") | .")"
 
   if [[ ${#exec_args[@]} -lt 1 ]] || [[ "${command_json}" == "" ]]; then
-    centry:help 'Unknown command!' 'commands' "${command_names[*]}" 1
+    centry:help 'Unknown command!' 'Commands' "${command_names[*]}" 1
   fi
 
   centry:load_script "$(echo ${command_json:?} | jq -r '.path')"
